@@ -6,10 +6,12 @@ A simple, fast, and modern web application to create clean text logos with custo
 
 - **Custom Canvas Sizing**: Flexible presets (Social, Favicon, Banner, App Icon) or custom dimensions.
 - **Rich Text Elements**: Add multiple text layers with custom positioning, font sizes, weights, letter spacing, and rotation.
+- **Image Uploads & Graphics**: Upload and embed PNG, JPG, SVG, and WebP images directly onto the canvas with drag-and-drop support, scaling, aspect ratio locking, corner rounding, and opacity controls.
+- **Layer Management**: Reorder layers (bring forward, send backward, bring to front, send to back) with a dedicated Layers inspector.
 - **Gradients & Colors**: Support for solid colors, linear gradients, and radial gradients with customizable angle and stops.
 - **Google Fonts Integration**: Browse and use fonts directly from the Google Fonts library with real-time preview and loading.
 - **Flexible Backgrounds**: Solid color, linear/radial gradients, or transparent background.
-- **Vector & Raster Exports**: Export lossless SVG or high-resolution PNG with custom scaling multipliers.
+- **Vector & Raster Exports**: Export self-contained, lossless SVG (with embedded fonts and base64 images) or high-resolution PNG with custom scaling multipliers.
 - **Undo / Redo & History**: Full state history support for seamless editing.
 - **Mobile Friendly & Responsive**: Clean and modern UI tailored for both desktop and mobile screens.
 
