@@ -54,11 +54,23 @@ export async function serializeSvg(
   clone.setAttribute("width", String(opts.width));
   clone.setAttribute("height", String(opts.height));
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
   clone.removeAttribute("style");
   clone.removeAttribute("class");
 
+  // Ensure all image elements have both href and xlink:href for broad SVG compatibility
+  clone.querySelectorAll("image").forEach((img) => {
+    const href = img.getAttribute("href") || img.getAttribute("xlink:href");
+    if (href) {
+      img.setAttribute("href", href);
+      img.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", href);
+    }
+  });
+
   const unique = new Map<string, { family: string; weight: number }>();
-  opts.fonts.forEach((f) => unique.set(`${f.family}::${f.weight}`, f));
+  opts.fonts.forEach((f) => {
+    if (f && f.family) unique.set(`${f.family}::${f.weight}`, f);
+  });
   const css = (await Promise.all([...unique.values()].map((f) => embedFont(f.family, f.weight))))
     .join("")
     .trim();

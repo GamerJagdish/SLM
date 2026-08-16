@@ -3,16 +3,26 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
   Copy,
   Download,
   Grid3x3,
+  ImageIcon,
+  Layers,
   Link2,
+  Lock,
   Magnet,
+  MoveDown,
+  MoveUp,
   Plus,
   Redo2,
+  RefreshCw,
   Trash2,
   Type,
   Undo2,
+  Unlock,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -38,12 +48,23 @@ import { loadGoogleFont } from "@/lib/font-loader";
 import { downloadPng, downloadSvg, serializeSvg } from "@/lib/export";
 import { buildShareUrl, decodeDoc, loadLocal, saveLocal } from "@/lib/share";
 import { useHistory } from "@/hooks/useHistory";
-import { CANVAS_PRESETS, newTextElement, uid, type LogoDoc, type TextElement } from "@/lib/logo";
+import {
+  CANVAS_PRESETS,
+  isImageElement,
+  isTextElement,
+  newImageElement,
+  newTextElement,
+  uid,
+  type CanvasElement,
+  type ImageElement,
+  type LogoDoc,
+  type TextElement,
+} from "@/lib/logo";
 import { cn } from "@/lib/utils";
 
-const TITLE = "SLM - Simple Logo Maker";
+const TITLE = "SLM — Simple Logo Maker";
 const DESC =
-  "Design a logo in your browser: pick a canvas, add text with any Google Font, apply gradients, then export SVG or PNG at any size.";
+  "Design a logo in your browser: pick a canvas, add text and images with any Google Font, apply gradients, then export SVG or PNG at any size.";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -125,7 +146,10 @@ function Studio() {
   const [busy, setBusy] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [snap, setSnap] = useState(true);
+  const [lockAspect, setLockAspect] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
 
   // Restore from a share link (?d=...) or the last local autosave.
   useEffect(() => {
@@ -154,7 +178,7 @@ function Studio() {
   }, [doc.elements, selectedId]);
 
   useEffect(() => {
-    doc.elements.forEach((el) => loadGoogleFont(el.family, el.weight));
+    doc.elements.filter(isTextElement).forEach((el) => loadGoogleFont(el.family, el.weight));
   }, [doc.elements]);
 
   useEffect(() => {
@@ -174,19 +198,20 @@ function Studio() {
   const ratio = doc.height / doc.width;
   const exportHeight = Math.round(exportWidth * ratio);
 
-  const patchEl = (id: string, patch: Partial<TextElement>, label = "") =>
+  const patchEl = (id: string, patch: Partial<CanvasElement>, label = "") =>
     setDoc(
       (d) => ({
         ...d,
-        elements: d.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+        elements: d.elements.map((e) => (e.id === id ? ({ ...e, ...patch } as CanvasElement) : e)),
       }),
       label ? `${label}:${id}` : "",
     );
 
   const weightOptions = useMemo(() => {
-    const f = fonts.find((x) => x.family === selected?.family);
+    if (!selected || !isTextElement(selected)) return [300, 400, 500, 600, 700, 800, 900];
+    const f = fonts.find((x) => x.family === selected.family);
     return f?.weights?.length ? f.weights : [300, 400, 500, 600, 700, 800, 900];
-  }, [fonts, selected?.family]);
+  }, [fonts, selected]);
 
   const setCanvas = (w: number, h: number) => {
     setDoc((d) => ({ ...d, width: w, height: h }), "canvas-size");
@@ -201,9 +226,104 @@ function Studio() {
     });
   };
 
+  const addImageFromFile = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, SVG, WebP)");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const src = e.target?.result as string;
+      if (!src) return;
+
+      const img = new Image();
+      img.onload = () => {
+        setDoc((d) => {
+          const el = newImageElement(
+            d,
+            src,
+            file.name.replace(/\.[^/.]+$/, ""),
+            img.naturalWidth || 400,
+            img.naturalHeight || 400,
+          );
+          setSelectedId(el.id);
+          return { ...d, elements: [...d.elements, el] };
+        });
+        toast.success("Image added to canvas");
+      };
+      img.onerror = () => {
+        toast.error("Could not load image");
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const replaceImageFromFile = (file: File, targetId: string) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, SVG, WebP)");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const src = e.target?.result as string;
+      if (!src) return;
+
+      const img = new Image();
+      img.onload = () => {
+        const aspect =
+          img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
+        patchEl(
+          targetId,
+          {
+            src,
+            name: file.name.replace(/\.[^/.]+$/, ""),
+            aspectRatio: aspect,
+          },
+          "replace-image",
+        );
+        toast.success("Image replaced");
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const moveLayer = (id: string, direction: "up" | "down" | "front" | "back") => {
+    setDoc((d) => {
+      const idx = d.elements.findIndex((e) => e.id === id);
+      if (idx === -1) return d;
+      const elements = [...d.elements];
+      const [item] = elements.splice(idx, 1);
+      if (!item) return d;
+
+      if (direction === "front") {
+        elements.push(item);
+      } else if (direction === "back") {
+        elements.unshift(item);
+      } else if (direction === "up") {
+        const nextIdx = Math.min(elements.length, idx + 1);
+        elements.splice(nextIdx, 0, item);
+      } else if (direction === "down") {
+        const prevIdx = Math.max(0, idx - 1);
+        elements.splice(prevIdx, 0, item);
+      }
+
+      return { ...d, elements };
+    }, `layer:${direction}`);
+  };
+
   const duplicate = () => {
     if (!selected) return;
-    const copy = { ...selected, id: uid(), y: selected.y + selected.size * 0.9 };
+    const offset = isTextElement(selected) ? selected.size * 0.9 : 30;
+    const copy: CanvasElement = {
+      ...selected,
+      id: uid(),
+      x: selected.x + 20,
+      y: selected.y + offset,
+    };
     setDoc((d) => ({ ...d, elements: [...d.elements, copy] }));
     setSelectedId(copy.id);
   };
@@ -229,10 +349,11 @@ function Studio() {
     if (!svgRef.current) return;
     setBusy(true);
     try {
+      const textElements = doc.elements.filter(isTextElement);
       const svgString = await serializeSvg(svgRef.current, {
         width: exportWidth,
         height: exportHeight,
-        fonts: doc.elements.map((e) => ({ family: e.family, weight: e.weight })),
+        fonts: textElements.map((e) => ({ family: e.family, weight: e.weight })),
       });
       const name = `slm-logo-${exportWidth}x${exportHeight}.${format}`;
       if (format === "svg") downloadSvg(svgString, name);
@@ -242,6 +363,24 @@ function Studio() {
       toast.error(err instanceof Error ? err.message : "Export failed");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const updateImageWidth = (imgEl: ImageElement, newWidth: number) => {
+    if (lockAspect && imgEl.aspectRatio > 0) {
+      const newHeight = Math.max(10, Math.round(newWidth / imgEl.aspectRatio));
+      patchEl(imgEl.id, { width: newWidth, height: newHeight }, "size");
+    } else {
+      patchEl(imgEl.id, { width: newWidth }, "size");
+    }
+  };
+
+  const updateImageHeight = (imgEl: ImageElement, newHeight: number) => {
+    if (lockAspect && imgEl.aspectRatio > 0) {
+      const newWidth = Math.max(10, Math.round(newHeight * imgEl.aspectRatio));
+      patchEl(imgEl.id, { width: newWidth, height: newHeight }, "size");
+    } else {
+      patchEl(imgEl.id, { height: newHeight }, "size");
     }
   };
 
@@ -280,7 +419,7 @@ function Studio() {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Fonts are embedded in the file, so exports render everywhere.
+        Fonts and images are embedded in the file, so exports render everywhere.
       </p>
     </>
   );
@@ -288,6 +427,31 @@ function Studio() {
   return (
     <div className="min-h-screen bg-background">
       <Toaster position="top-center" />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) addImageFromFile(file);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={replaceFileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && selected && isImageElement(selected)) {
+            replaceImageFromFile(file, selected.id);
+          }
+          e.target.value = "";
+        }}
+      />
+
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto grid max-w-[1500px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -299,7 +463,7 @@ function Studio() {
                 Simple Logo Maker
               </h1>
               <p className="hidden truncate text-xs text-muted-foreground sm:block">
-                Text, gradients, any Google Font. Export SVG or PNG.
+                Text, images, gradients, any Google Font. Export SVG or PNG.
               </p>
             </div>
           </div>
@@ -332,10 +496,14 @@ function Studio() {
             svgRef={svgRef}
             showGrid={showGrid}
             snap={snap}
+            onDropImage={addImageFromFile}
           />
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="secondary" onClick={addText}>
               <Plus className="size-4" /> Add text
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="size-4" /> Add image
             </Button>
             <Button size="sm" variant="secondary" disabled={!selected} onClick={duplicate}>
               <Copy className="size-4" /> Duplicate
@@ -369,37 +537,60 @@ function Studio() {
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {doc.elements.map((el) => (
-              <button
-                key={el.id}
-                onClick={() => setSelectedId(el.id)}
-                className={cn(
-                  "flex max-w-40 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
-                  el.id === selectedId
-                    ? "border-primary bg-primary/15 text-foreground"
-                    : "border-border bg-surface text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Type className="size-3 shrink-0" />
-                <span className="truncate">{el.text || "empty"}</span>
-              </button>
-            ))}
+            {doc.elements.map((el) => {
+              const isTxt = isTextElement(el);
+              const label = isTxt ? el.text || "empty text" : el.name || "Image";
+              return (
+                <button
+                  key={el.id}
+                  onClick={() => setSelectedId(el.id)}
+                  className={cn(
+                    "flex max-w-44 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
+                    el.id === selectedId
+                      ? "border-primary bg-primary/15 text-foreground"
+                      : "border-border bg-surface text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {isTxt ? (
+                    <Type className="size-3 shrink-0" />
+                  ) : (
+                    <ImageIcon className="size-3 shrink-0" />
+                  )}
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
           </div>
         </section>
 
         <aside className="panel h-fit p-3 lg:sticky lg:top-20">
-          <Tabs defaultValue="text">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="text">Text</TabsTrigger>
+          <Tabs defaultValue="element">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="element">
+                {selected && isImageElement(selected) ? "Image" : "Text"}
+              </TabsTrigger>
               <TabsTrigger value="canvas">Canvas</TabsTrigger>
+              <TabsTrigger value="layers">Layers</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="text" className="mt-4 space-y-4">
+            <TabsContent value="element" className="mt-4 space-y-4">
               {!selected ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">
-                  Select or add a text element.
-                </p>
-              ) : (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  <p>Select an element or add one above.</p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <Button size="sm" variant="outline" onClick={addText}>
+                      <Plus className="size-4" /> Add text
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="size-4" /> Add image
+                    </Button>
+                  </div>
+                </div>
+              ) : isTextElement(selected) ? (
                 <>
                   <Field label="Content">
                     <Input
@@ -504,6 +695,193 @@ function Studio() {
                       Center Y
                     </Button>
                   </div>
+
+                  <Field label="Layer Order">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Bring to front"
+                        onClick={() => moveLayer(selected.id, "front")}
+                      >
+                        <ArrowUpToLine className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Move up"
+                        onClick={() => moveLayer(selected.id, "up")}
+                      >
+                        <MoveUp className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Move down"
+                        onClick={() => moveLayer(selected.id, "down")}
+                      >
+                        <MoveDown className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Send to back"
+                        onClick={() => moveLayer(selected.id, "back")}
+                      >
+                        <ArrowDownToLine className="size-4" />
+                      </Button>
+                    </div>
+                  </Field>
+                </>
+              ) : (
+                /* Image Element Inspector */
+                <>
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-surface p-2.5">
+                    <div className="size-12 shrink-0 overflow-hidden rounded border border-border bg-black/20">
+                      <img
+                        src={selected.src}
+                        alt={selected.name}
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-semibold text-foreground">
+                        {selected.name}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {selected.width} × {selected.height} px
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Replace image"
+                      onClick={() => replaceFileInputRef.current?.click()}
+                    >
+                      <RefreshCw className="size-3.5" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Dimensions
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setLockAspect((v) => !v)}
+                    >
+                      {lockAspect ? (
+                        <>
+                          <Lock className="mr-1 size-3 text-primary" /> Lock Aspect
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="mr-1 size-3 text-muted-foreground" /> Free
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  <Range
+                    label="Width"
+                    value={selected.width}
+                    min={10}
+                    max={Math.round(doc.width * 2)}
+                    suffix="px"
+                    onChange={(v) => updateImageWidth(selected, v)}
+                  />
+
+                  <Range
+                    label="Height"
+                    value={selected.height}
+                    min={10}
+                    max={Math.round(doc.height * 2)}
+                    suffix="px"
+                    onChange={(v) => updateImageHeight(selected, v)}
+                  />
+
+                  <Range
+                    label="Corner radius"
+                    value={selected.borderRadius ?? 0}
+                    min={0}
+                    max={Math.round(Math.min(selected.width, selected.height) / 2)}
+                    suffix="px"
+                    onChange={(v) => patchEl(selected.id, { borderRadius: v }, "radius")}
+                  />
+
+                  <Range
+                    label="Rotation"
+                    value={selected.rotation}
+                    min={-180}
+                    max={180}
+                    suffix="°"
+                    onChange={(v) => patchEl(selected.id, { rotation: v }, "rot")}
+                  />
+
+                  <Range
+                    label="Opacity"
+                    value={Math.round(selected.opacity * 100)}
+                    min={0}
+                    max={100}
+                    suffix="%"
+                    onChange={(v) => patchEl(selected.id, { opacity: v / 100 }, "op")}
+                  />
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => patchEl(selected.id, { x: Math.round(doc.width / 2) })}
+                    >
+                      Center X
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => patchEl(selected.id, { y: Math.round(doc.height / 2) })}
+                    >
+                      Center Y
+                    </Button>
+                  </div>
+
+                  <Field label="Layer Order">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Bring to front"
+                        onClick={() => moveLayer(selected.id, "front")}
+                      >
+                        <ArrowUpToLine className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Move up"
+                        onClick={() => moveLayer(selected.id, "up")}
+                      >
+                        <MoveUp className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Move down"
+                        onClick={() => moveLayer(selected.id, "down")}
+                      >
+                        <MoveDown className="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        title="Send to back"
+                        onClick={() => moveLayer(selected.id, "back")}
+                      >
+                        <ArrowDownToLine className="size-4" />
+                      </Button>
+                    </div>
+                  </Field>
                 </>
               )}
             </TabsContent>
@@ -567,6 +945,78 @@ function Studio() {
                   }
                 />
               </Field>
+            </TabsContent>
+
+            <TabsContent value="layers" className="mt-4 space-y-3">
+              {doc.elements.length === 0 ? (
+                <p className="py-10 text-center text-sm text-muted-foreground">No layers yet.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {[...doc.elements].reverse().map((el, revIdx) => {
+                    const isTxt = isTextElement(el);
+                    const isSel = el.id === selectedId;
+                    const label = isTxt ? el.text || "Empty text" : el.name || "Image";
+
+                    return (
+                      <div
+                        key={el.id}
+                        onClick={() => setSelectedId(el.id)}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-xs transition-colors",
+                          isSel
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border bg-surface text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {isTxt ? (
+                          <Type className="size-4 shrink-0 text-primary" />
+                        ) : (
+                          <ImageIcon className="size-4 shrink-0 text-emerald-400" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                        <div
+                          className="flex items-center gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 p-0"
+                            title="Move up"
+                            onClick={() => moveLayer(el.id, "up")}
+                          >
+                            <MoveUp className="size-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 p-0"
+                            title="Move down"
+                            onClick={() => moveLayer(el.id, "down")}
+                          >
+                            <MoveDown className="size-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 p-0 text-destructive hover:text-destructive"
+                            title="Delete"
+                            onClick={() => {
+                              setDoc((d) => ({
+                                ...d,
+                                elements: d.elements.filter((x) => x.id !== el.id),
+                              }));
+                              if (selectedId === el.id) setSelectedId(null);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </aside>

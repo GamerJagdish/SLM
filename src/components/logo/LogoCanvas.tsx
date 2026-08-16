@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { angleToCoords, type LogoDoc } from "@/lib/logo";
+import { angleToCoords, isImageElement, isTextElement, type LogoDoc } from "@/lib/logo";
+import { cn } from "@/lib/utils";
 
 type Props = {
   doc: LogoDoc;
@@ -9,6 +10,7 @@ type Props = {
   svgRef: React.RefObject<SVGSVGElement | null>;
   showGrid?: boolean;
   snap?: boolean;
+  onDropImage?: (file: File) => void;
 };
 
 export function LogoCanvas({
@@ -19,8 +21,10 @@ export function LogoCanvas({
   svgRef,
   showGrid = false,
   snap = true,
+  onDropImage,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
   const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
@@ -28,10 +32,14 @@ export function LogoCanvas({
   const measure = useCallback(() => {
     const svg = svgRef.current;
     if (!svg || !selectedId) return setBox(null);
-    const node = svg.querySelector<SVGTextElement>(`[data-el="${selectedId}"]`);
+    const node = svg.querySelector<SVGGraphicsElement>(`[data-el="${selectedId}"]`);
     if (!node) return setBox(null);
-    const b = node.getBBox();
-    setBox({ x: b.x, y: b.y, w: b.width, h: b.height });
+    try {
+      const b = node.getBBox();
+      setBox({ x: b.x, y: b.y, w: b.width, h: b.height });
+    } catch {
+      setBox(null);
+    }
   }, [selectedId, svgRef]);
 
   useEffect(() => {
@@ -114,10 +122,40 @@ export function LogoCanvas({
   const bg = doc.background;
   const bgCoords = angleToCoords(bg.angle);
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (!onDropImage) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      onDropImage(file);
+    }
+  };
+
   return (
-    <div ref={wrapRef} className="flex w-full items-center justify-center">
+    <div
+      ref={wrapRef}
+      className="flex w-full items-center justify-center"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div
-        className="checkerboard relative max-h-[62vh] w-full overflow-hidden rounded-xl border border-border shadow-2xl"
+        className={cn(
+          "checkerboard relative max-h-[62vh] w-full overflow-hidden rounded-xl border shadow-2xl transition-all",
+          isDragOver ? "border-primary ring-2 ring-primary/50" : "border-border",
+        )}
         style={{
           aspectRatio: `${doc.width} / ${doc.height}`,
           maxWidth: `min(100%, ${(doc.width / doc.height) * 62}vh)`,
@@ -129,6 +167,7 @@ export function LogoCanvas({
           width="100%"
           height="100%"
           xmlns="http://www.w3.org/2000/svg"
+          xmlnsXlink="http://www.w3.org/1999/xlink"
           className="block h-full w-full touch-none select-none"
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
@@ -159,6 +198,7 @@ export function LogoCanvas({
               </radialGradient>
             )}
             {doc.elements.map((el) => {
+              if (!isTextElement(el)) return null;
               if (el.fill.type === "solid") return null;
               const c = angleToCoords(el.fill.angle);
               const id = `slm-fill-${el.id}`;
@@ -217,27 +257,73 @@ export function LogoCanvas({
             </g>
           )}
 
-          {doc.elements.map((el) => (
-            <text
-              key={el.id}
-              data-el={el.id}
-              x={el.x}
-              y={el.y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontFamily={`'${el.family}'`}
-              fontWeight={el.weight}
-              fontSize={el.size}
-              letterSpacing={el.letterSpacing}
-              opacity={el.opacity}
-              fill={el.fill.type === "solid" ? el.fill.color : `url(#slm-fill-${el.id})`}
-              transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
-              style={{ cursor: "move" }}
-              onPointerDown={(e) => onPointerDown(e, el.id)}
-            >
-              {el.text}
-            </text>
-          ))}
+          {doc.elements.map((el) => {
+            if (isTextElement(el)) {
+              return (
+                <text
+                  key={el.id}
+                  data-el={el.id}
+                  x={el.x}
+                  y={el.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily={`'${el.family}'`}
+                  fontWeight={el.weight}
+                  fontSize={el.size}
+                  letterSpacing={el.letterSpacing}
+                  opacity={el.opacity}
+                  fill={el.fill.type === "solid" ? el.fill.color : `url(#slm-fill-${el.id})`}
+                  transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
+                  style={{ cursor: "move" }}
+                  onPointerDown={(e) => onPointerDown(e, el.id)}
+                >
+                  {el.text}
+                </text>
+              );
+            }
+
+            if (isImageElement(el)) {
+              const clipId =
+                el.borderRadius && el.borderRadius > 0 ? `slm-clip-${el.id}` : undefined;
+              return (
+                <g
+                  key={el.id}
+                  data-el={el.id}
+                  transform={`translate(${el.x}, ${el.y}) rotate(${el.rotation})`}
+                  opacity={el.opacity}
+                  style={{ cursor: "move" }}
+                  onPointerDown={(e) => onPointerDown(e, el.id)}
+                >
+                  {clipId && (
+                    <defs>
+                      <clipPath id={clipId}>
+                        <rect
+                          x={-el.width / 2}
+                          y={-el.height / 2}
+                          width={el.width}
+                          height={el.height}
+                          rx={el.borderRadius}
+                          ry={el.borderRadius}
+                        />
+                      </clipPath>
+                    </defs>
+                  )}
+                  <image
+                    href={el.src}
+                    x={-el.width / 2}
+                    y={-el.height / 2}
+                    width={el.width}
+                    height={el.height}
+                    preserveAspectRatio="none"
+                    clipPath={clipId ? `url(#${clipId})` : undefined}
+                    style={{ pointerEvents: "auto" }}
+                  />
+                </g>
+              );
+            }
+
+            return null;
+          })}
 
           {box && selectedId && (
             <g data-editor-only="true" pointerEvents="none">
@@ -281,6 +367,12 @@ export function LogoCanvas({
             </g>
           )}
         </svg>
+
+        {isDragOver && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/80 backdrop-blur-xs">
+            <p className="text-sm font-medium text-foreground">Drop image here to add to canvas</p>
+          </div>
+        )}
       </div>
     </div>
   );

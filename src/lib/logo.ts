@@ -11,6 +11,7 @@ export type Fill = {
 
 export type TextElement = {
   id: string;
+  type?: "text";
   text: string;
   family: string;
   weight: number;
@@ -22,6 +23,31 @@ export type TextElement = {
   opacity: number;
   fill: Fill;
 };
+
+export type ImageElement = {
+  id: string;
+  type: "image";
+  src: string; // Base64 data URL or image URL
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  aspectRatio: number;
+  borderRadius?: number;
+};
+
+export type CanvasElement = TextElement | ImageElement;
+
+export function isTextElement(el: CanvasElement): el is TextElement {
+  return !("type" in el) || el.type === "text" || "text" in el;
+}
+
+export function isImageElement(el: CanvasElement): el is ImageElement {
+  return "type" in el && el.type === "image";
+}
 
 export type BackgroundType = "transparent" | "solid" | "linear" | "radial";
 
@@ -36,7 +62,7 @@ export type LogoDoc = {
   width: number;
   height: number;
   background: Background;
-  elements: TextElement[];
+  elements: CanvasElement[];
 };
 
 export const CANVAS_PRESETS = [
@@ -109,16 +135,51 @@ export function defaultFill(): Fill {
 export function newTextElement(doc: LogoDoc, text = "Your Brand"): TextElement {
   return {
     id: uid(),
+    type: "text",
     text,
     family: "Space Grotesk",
     weight: 700,
     size: Math.round(Math.min(doc.width, doc.height) * 0.16),
     letterSpacing: 0,
-    x: doc.width / 2,
-    y: doc.height / 2,
+    x: Math.round(doc.width / 2),
+    y: Math.round(doc.height / 2),
     rotation: 0,
     opacity: 1,
     fill: defaultFill(),
+  };
+}
+
+export function newImageElement(
+  doc: LogoDoc,
+  src: string,
+  name: string,
+  naturalWidth: number,
+  naturalHeight: number,
+): ImageElement {
+  const maxInitialSize = Math.round(Math.min(doc.width, doc.height) * 0.45);
+  const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1;
+  let w = maxInitialSize;
+  let h = maxInitialSize;
+  if (aspect >= 1) {
+    w = maxInitialSize;
+    h = Math.max(20, Math.round(maxInitialSize / aspect));
+  } else {
+    h = maxInitialSize;
+    w = Math.max(20, Math.round(maxInitialSize * aspect));
+  }
+  return {
+    id: uid(),
+    type: "image",
+    src,
+    name: name || "Image",
+    x: Math.round(doc.width / 2),
+    y: Math.round(doc.height / 2),
+    width: w,
+    height: h,
+    rotation: 0,
+    opacity: 1,
+    aspectRatio: aspect,
+    borderRadius: 0,
   };
 }
 
