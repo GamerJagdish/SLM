@@ -40,8 +40,8 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/SLM.git
-cd SLM
+git clone https://github.com/GamerJagdish/slm.git
+cd slm
 
 # Install dependencies
 bun install
