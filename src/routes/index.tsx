@@ -18,6 +18,7 @@ import {
   Plus,
   Redo2,
   RefreshCw,
+  Sparkles,
   Trash2,
   Type,
   Undo2,
@@ -62,7 +63,7 @@ import {
 } from "@/lib/logo";
 import { cn } from "@/lib/utils";
 
-const TITLE = "SLM — Simple Logo Maker";
+const TITLE = "SLM - Simple Logo Maker";
 const DESC =
   "Design a logo in your browser: pick a canvas, add text and images with any Google Font, apply gradients, then export SVG or PNG at any size.";
 
@@ -175,7 +176,9 @@ function Studio() {
   }, [doc]);
 
   useEffect(() => {
-    doc.elements.filter(isTextElement).forEach((el) => loadGoogleFont(el.family, el.weight));
+    doc.elements
+      .filter(isTextElement)
+      .forEach((el) => loadGoogleFont(el.family, el.weight, el.fontWidth));
   }, [doc.elements]);
 
   useEffect(() => {
@@ -208,11 +211,19 @@ function Studio() {
       label ? `${label}:${id}` : "",
     );
 
+  const activeFont = useMemo(() => {
+    if (!selected || !isTextElement(selected)) return null;
+    return fonts.find((x) => x.family.toLowerCase() === selected.family.toLowerCase()) ?? null;
+  }, [fonts, selected]);
+
+  const wdthAxis = useMemo(() => {
+    return activeFont?.axes?.find((a) => a.tag === "wdth") ?? null;
+  }, [activeFont]);
+
   const weightOptions = useMemo(() => {
     if (!selected || !isTextElement(selected)) return [300, 400, 500, 600, 700, 800, 900];
-    const f = fonts.find((x) => x.family === selected.family);
-    return f?.weights?.length ? f.weights : [300, 400, 500, 600, 700, 800, 900];
-  }, [fonts, selected]);
+    return activeFont?.weights?.length ? activeFont.weights : [300, 400, 500, 600, 700, 800, 900];
+  }, [activeFont, selected]);
 
   const setCanvas = (w: number, h: number) => {
     setDoc((d) => ({ ...d, width: w, height: h }), "canvas-size");
@@ -354,7 +365,11 @@ function Studio() {
       const svgString = await serializeSvg(svgRef.current, {
         width: exportWidth,
         height: exportHeight,
-        fonts: textElements.map((e) => ({ family: e.family, weight: e.weight })),
+        fonts: textElements.map((e) => ({
+          family: e.family,
+          weight: e.weight,
+          fontWidth: e.fontWidth,
+        })),
       });
       const name = `slm-logo-${exportWidth}x${exportHeight}.${format}`;
       if (format === "svg") downloadSvg(svgString, name);
@@ -611,8 +626,10 @@ function Studio() {
                         const weight = f?.weights?.includes(selected.weight)
                           ? selected.weight
                           : (f?.weights?.[f.weights.length - 1] ?? 400);
-                        loadGoogleFont(family, weight);
-                        patchEl(selected.id, { family, weight });
+                        const fontWdth = f?.axes?.find((a) => a.tag === "wdth");
+                        const newFontWidth = fontWdth ? (fontWdth.defaultValue ?? 100) : 100;
+                        loadGoogleFont(family, weight, newFontWidth);
+                        patchEl(selected.id, { family, weight, fontWidth: newFontWidth });
                       }}
                     />
                   </Field>
@@ -621,7 +638,7 @@ function Studio() {
                     <Select
                       value={String(selected.weight)}
                       onValueChange={(v) => {
-                        loadGoogleFont(selected.family, Number(v));
+                        loadGoogleFont(selected.family, Number(v), selected.fontWidth);
                         patchEl(selected.id, { weight: Number(v) });
                       }}
                     >
@@ -637,6 +654,78 @@ function Studio() {
                       </SelectContent>
                     </Select>
                   </Field>
+
+                  {/* Variable Font Width Axis (OpenType 'wdth') */}
+                  {wdthAxis && (
+                    <div className="space-y-2 rounded-lg border border-primary/25 bg-primary/5 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                          <Sparkles className="size-3.5" /> Variable Width Axis
+                        </span>
+                        <span className="font-mono text-xs font-bold text-primary">
+                          {selected.fontWidth ?? wdthAxis.defaultValue ?? 100}%
+                        </span>
+                      </div>
+                      <Slider
+                        value={[selected.fontWidth ?? wdthAxis.defaultValue ?? 100]}
+                        min={Math.round(wdthAxis.min)}
+                        max={Math.round(wdthAxis.max)}
+                        step={1}
+                        onValueChange={([v]) => {
+                          const val = v ?? 100;
+                          loadGoogleFont(selected.family, selected.weight, val);
+                          patchEl(selected.id, { fontWidth: val }, "wdth");
+                        }}
+                      />
+                      <div className="flex justify-between text-[10px] text-muted-foreground">
+                        <span>Condensed ({Math.round(wdthAxis.min)}%)</span>
+                        <span>Expanded ({Math.round(wdthAxis.max)}%)</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Typography Stretch (Scale X & Scale Y) */}
+                  <div className="space-y-3 rounded-lg border border-border bg-surface/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Typography Stretch
+                      </span>
+                      {((selected.scaleX && selected.scaleX !== 1) ||
+                        (selected.scaleY && selected.scaleY !== 1) ||
+                        (selected.fontWidth && selected.fontWidth !== 100)) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() =>
+                            patchEl(
+                              selected.id,
+                              { scaleX: 1, scaleY: 1, fontWidth: wdthAxis?.defaultValue ?? 100 },
+                              "rst-stretch",
+                            )
+                          }
+                        >
+                          Reset 1:1
+                        </Button>
+                      )}
+                    </div>
+                    <Range
+                      label="Horizontal Stretch (Width)"
+                      value={Math.round((selected.scaleX ?? 1) * 100)}
+                      min={20}
+                      max={350}
+                      suffix="%"
+                      onChange={(v) => patchEl(selected.id, { scaleX: v / 100 }, "sx")}
+                    />
+                    <Range
+                      label="Vertical Stretch (Height)"
+                      value={Math.round((selected.scaleY ?? 1) * 100)}
+                      min={20}
+                      max={350}
+                      suffix="%"
+                      onChange={(v) => patchEl(selected.id, { scaleY: v / 100 }, "sy")}
+                    />
+                  </div>
 
                   <Range
                     label="Size"

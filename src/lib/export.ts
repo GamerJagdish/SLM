@@ -13,16 +13,18 @@ async function toDataUri(url: string): Promise<string> {
 }
 
 /** Fetch a Google font CSS and inline its latin woff2 files as data URIs. */
-async function embedFont(family: string, weight: number): Promise<string> {
-  const key = `${family}::${weight}`;
+async function embedFont(family: string, weight: number, fontWidth?: number): Promise<string> {
+  const w = fontWidth && fontWidth !== 100 ? Math.round(fontWidth) : undefined;
+  const key = `${family}::${weight}::${w ?? 100}`;
   const cached = fontCache.get(key);
   if (cached !== undefined) return cached;
 
   let out = "";
   try {
+    const params = w ? `wdth,wght@${w},${weight}` : `wght@${weight}`;
     const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(
       family,
-    )}:wght@${weight}&display=swap`;
+    )}:${params}&display=swap`;
     const css = await fetch(href).then((r) => (r.ok ? r.text() : ""));
     const blocks = [...css.matchAll(/\/\*\s*([\w-]+)\s*\*\/\s*(@font-face\s*\{[^}]+\})/g)].filter(
       ([, subset]) => subset === "latin" || subset === "latin-ext",
@@ -47,7 +49,11 @@ async function embedFont(family: string, weight: number): Promise<string> {
 
 export async function serializeSvg(
   svg: SVGSVGElement,
-  opts: { width: number; height: number; fonts: { family: string; weight: number }[] },
+  opts: {
+    width: number;
+    height: number;
+    fonts: { family: string; weight: number; fontWidth?: number | undefined }[];
+  },
 ): Promise<string> {
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.querySelectorAll("[data-editor-only]").forEach((n) => n.remove());
@@ -67,11 +73,16 @@ export async function serializeSvg(
     }
   });
 
-  const unique = new Map<string, { family: string; weight: number }>();
+  const unique = new Map<
+    string,
+    { family: string; weight: number; fontWidth?: number | undefined }
+  >();
   opts.fonts.forEach((f) => {
-    if (f && f.family) unique.set(`${f.family}::${f.weight}`, f);
+    if (f && f.family) unique.set(`${f.family}::${f.weight}::${f.fontWidth ?? 100}`, f);
   });
-  const css = (await Promise.all([...unique.values()].map((f) => embedFont(f.family, f.weight))))
+  const css = (
+    await Promise.all([...unique.values()].map((f) => embedFont(f.family, f.weight, f.fontWidth)))
+  )
     .join("")
     .trim();
 

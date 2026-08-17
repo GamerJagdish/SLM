@@ -1,9 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
 
+export type FontAxis = {
+  tag: string;
+  min: number;
+  max: number;
+  defaultValue: number;
+};
+
 export type GoogleFont = {
   family: string;
   category: string;
   weights: number[];
+  axes?: FontAxis[] | undefined;
 };
 
 const FALLBACK: GoogleFont[] = [
@@ -28,6 +36,7 @@ export const getGoogleFonts = createServerFn({ method: "GET" }).handler(
         category: string;
         popularity: number;
         fonts: Record<string, unknown>;
+        axes?: Array<{ tag: string; min: number; max: number; defaultValue: number }>;
       }>;
       return list
         .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
@@ -41,6 +50,12 @@ export const getGoogleFonts = createServerFn({ method: "GET" }).handler(
             family: f.family,
             category: f.category ?? "Sans Serif",
             weights: weights.length ? weights : [400],
+            axes: f.axes?.map((a) => ({
+              tag: a.tag,
+              min: a.min,
+              max: a.max,
+              defaultValue: a.defaultValue,
+            })),
           };
         });
     } catch {

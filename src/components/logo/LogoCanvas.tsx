@@ -39,7 +39,7 @@ type DragAction =
       originRotation: number;
     }
   | {
-      type: "resize";
+      type: "corner-resize";
       id: string;
       handle: "nw" | "ne" | "se" | "sw";
       centerX: number;
@@ -47,7 +47,21 @@ type DragAction =
       startDist: number;
       startWidth: number;
       startHeight: number;
-      startSize?: number;
+      startSize?: number | undefined;
+      isText: boolean;
+    }
+  | {
+      type: "side-stretch";
+      id: string;
+      axis: "x" | "y";
+      centerX: number;
+      centerY: number;
+      rad: number;
+      startOffset: number;
+      startScaleX: number;
+      startScaleY: number;
+      startWidth: number;
+      startHeight: number;
       isText: boolean;
     };
 
@@ -74,7 +88,7 @@ export function LogoCanvas({
     if (!svg) return;
     const newMeasured: Record<string, { w: number; h: number }> = {};
     doc.elements.filter(isTextElement).forEach((el) => {
-      const node = svg.querySelector<SVGTextElement>(`text[data-el="${el.id}"]`);
+      const node = svg.querySelector<SVGTextElement>(`text[data-el-text="${el.id}"]`);
       if (node) {
         try {
           const b = node.getBBox();
@@ -151,7 +165,7 @@ export function LogoCanvas({
     (e.target as Element).setPointerCapture?.(e.pointerId);
   };
 
-  const onPointerDownResize = (
+  const onPointerDownCornerResize = (
     e: React.PointerEvent,
     id: string,
     handle: "nw" | "ne" | "se" | "sw",
@@ -165,7 +179,7 @@ export function LogoCanvas({
     const isText = isTextElement(el);
 
     dragAction.current = {
-      type: "resize",
+      type: "corner-resize",
       id,
       handle,
       centerX: el.x,
@@ -174,6 +188,35 @@ export function LogoCanvas({
       startWidth: isText ? el.size : el.width,
       startHeight: isText ? el.size : el.height,
       startSize: isText ? el.size : undefined,
+      isText,
+    };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerDownSideStretch = (
+    e: React.PointerEvent,
+    id: string,
+    axis: "x" | "y",
+    currentHalfSpan: number,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = doc.elements.find((n) => n.id === id);
+    if (!el) return;
+    const isText = isTextElement(el);
+
+    dragAction.current = {
+      type: "side-stretch",
+      id,
+      axis,
+      centerX: el.x,
+      centerY: el.y,
+      rad: (el.rotation * Math.PI) / 180,
+      startOffset: Math.max(currentHalfSpan, 10),
+      startScaleX: isText ? (el.scaleX ?? 1) : 1,
+      startScaleY: isText ? (el.scaleY ?? 1) : 1,
+      startWidth: isText ? 0 : el.width,
+      startHeight: isText ? 0 : el.height,
       isText,
     };
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -238,7 +281,7 @@ export function LogoCanvas({
       }
 
       onRotate?.(act.id, rot);
-    } else if (act.type === "resize") {
+    } else if (act.type === "corner-resize") {
       const curDist = Math.hypot(pt.x - act.centerX, pt.y - act.centerY);
       const scale = Math.max(0.08, curDist / act.startDist);
 
@@ -252,6 +295,40 @@ export function LogoCanvas({
         const newWidth = Math.max(16, Math.round(act.startWidth * scale));
         const newHeight = Math.max(16, Math.round(act.startHeight * scale));
         onResize?.(act.id, { width: newWidth, height: newHeight });
+      }
+    } else if (act.type === "side-stretch") {
+      const dx = pt.x - act.centerX;
+      const dy = pt.y - act.centerY;
+      // Project delta into element's rotated local coordinate system
+      const localX = dx * Math.cos(act.rad) + dy * Math.sin(act.rad);
+      const localY = -dx * Math.sin(act.rad) + dy * Math.cos(act.rad);
+
+      if (act.axis === "x") {
+        const currentSpan = Math.abs(localX);
+        const ratio = Math.max(0.1, currentSpan / act.startOffset);
+        if (act.isText) {
+          const newScaleX = Math.max(
+            0.15,
+            Math.min(6, Math.round(act.startScaleX * ratio * 100) / 100),
+          );
+          onResize?.(act.id, { scaleX: newScaleX });
+        } else {
+          const newWidth = Math.max(16, Math.round(act.startWidth * ratio));
+          onResize?.(act.id, { width: newWidth });
+        }
+      } else {
+        const currentSpan = Math.abs(localY);
+        const ratio = Math.max(0.1, currentSpan / act.startOffset);
+        if (act.isText) {
+          const newScaleY = Math.max(
+            0.15,
+            Math.min(6, Math.round(act.startScaleY * ratio * 100) / 100),
+          );
+          onResize?.(act.id, { scaleY: newScaleY });
+        } else {
+          const newHeight = Math.max(16, Math.round(act.startHeight * ratio));
+          onResize?.(act.id, { height: newHeight });
+        }
       }
     }
   };
@@ -297,8 +374,12 @@ export function LogoCanvas({
       selH = selectedEl.height;
     } else if (isTextElement(selectedEl)) {
       const m = measuredText[selectedEl.id];
-      selW = m?.w || Math.max(20, selectedEl.size * (selectedEl.text?.length || 1) * 0.6);
-      selH = m?.h || Math.max(20, selectedEl.size);
+      const sx = selectedEl.scaleX ?? 1;
+      const sy = selectedEl.scaleY ?? 1;
+      const baseW = m?.w || Math.max(20, selectedEl.size * (selectedEl.text?.length || 1) * 0.6);
+      const baseH = m?.h || Math.max(20, selectedEl.size);
+      selW = Math.max(16, baseW * sx);
+      selH = Math.max(16, baseH * sy);
     }
   }
 
@@ -306,6 +387,8 @@ export function LogoCanvas({
   const pad = Math.max(6, doc.width / 150);
   const strokeWidth = Math.max(1.5, doc.width / 500);
   const cornerR = Math.max(5, doc.width / 130);
+  const sidePillLong = Math.max(14, doc.width / 55);
+  const sidePillShort = Math.max(6, doc.width / 140);
   const rotateR = Math.max(11, doc.width / 65);
   const rotateOffset = Math.max(28, doc.width / 24);
 
@@ -425,26 +508,37 @@ export function LogoCanvas({
 
           {doc.elements.map((el) => {
             if (isTextElement(el)) {
+              const sx = el.scaleX ?? 1;
+              const sy = el.scaleY ?? 1;
+              const fontWidth = el.fontWidth ?? 100;
               return (
-                <text
+                <g
                   key={el.id}
                   data-el={el.id}
-                  x={el.x}
-                  y={el.y}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontFamily={`'${el.family}'`}
-                  fontWeight={el.weight}
-                  fontSize={el.size}
-                  letterSpacing={el.letterSpacing}
+                  transform={`translate(${el.x}, ${el.y}) rotate(${el.rotation}) scale(${sx}, ${sy})`}
                   opacity={el.opacity}
-                  fill={el.fill.type === "solid" ? el.fill.color : `url(#slm-fill-${el.id})`}
-                  transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
                   style={{ cursor: "move" }}
                   onPointerDown={(e) => onPointerDownMove(e, el.id)}
                 >
-                  {el.text}
-                </text>
+                  <text
+                    data-el-text={el.id}
+                    x={0}
+                    y={0}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontFamily={`'${el.family}'`}
+                    fontWeight={el.weight}
+                    fontSize={el.size}
+                    letterSpacing={el.letterSpacing}
+                    fill={el.fill.type === "solid" ? el.fill.color : `url(#slm-fill-${el.id})`}
+                    style={{
+                      fontVariationSettings: `'wdth' ${fontWidth}, 'wght' ${el.weight}`,
+                      fontStretch: `${fontWidth}%`,
+                    }}
+                  >
+                    {el.text}
+                  </text>
+                </g>
               );
             }
 
@@ -491,7 +585,7 @@ export function LogoCanvas({
             return null;
           })}
 
-          {/* Canva-style Selection Box, Corner Scaling Handles & Rotation Handle */}
+          {/* Canva-style Selection Box, Corner Scaling Handles, Side Stretch Handles & Rotation Handle */}
           {selectedEl && selW > 0 && selH > 0 && (
             <g
               data-editor-only="true"
@@ -526,7 +620,7 @@ export function LogoCanvas({
                     r={cornerR * 2.2}
                     fill="transparent"
                     style={{ cursor }}
-                    onPointerDown={(e) => onPointerDownResize(e, selectedEl.id, handle)}
+                    onPointerDown={(e) => onPointerDownCornerResize(e, selectedEl.id, handle)}
                   />
                   {/* Visible white handle knob */}
                   <circle
@@ -538,6 +632,111 @@ export function LogoCanvas({
                   />
                 </g>
               ))}
+
+              {/* 4 Side Stretch Handles (Canva/Figma Pill Style) */}
+              {/* Left / West Handle (Horizontal Stretch) */}
+              <g transform={`translate(${-selW / 2 - pad}, 0)`}>
+                <rect
+                  x={-sidePillShort * 1.5}
+                  y={-sidePillLong}
+                  width={sidePillShort * 3}
+                  height={sidePillLong * 2}
+                  fill="transparent"
+                  style={{ cursor: "ew-resize" }}
+                  onPointerDown={(e) =>
+                    onPointerDownSideStretch(e, selectedEl.id, "x", selW / 2 + pad)
+                  }
+                />
+                <rect
+                  x={-sidePillShort / 2}
+                  y={-sidePillLong / 2}
+                  width={sidePillShort}
+                  height={sidePillLong}
+                  rx={sidePillShort / 2}
+                  fill="#ffffff"
+                  stroke={ACCENT_COLOR}
+                  strokeWidth={strokeWidth * 1.1}
+                  style={{ cursor: "ew-resize", pointerEvents: "none" }}
+                />
+              </g>
+
+              {/* Right / East Handle (Horizontal Stretch) */}
+              <g transform={`translate(${selW / 2 + pad}, 0)`}>
+                <rect
+                  x={-sidePillShort * 1.5}
+                  y={-sidePillLong}
+                  width={sidePillShort * 3}
+                  height={sidePillLong * 2}
+                  fill="transparent"
+                  style={{ cursor: "ew-resize" }}
+                  onPointerDown={(e) =>
+                    onPointerDownSideStretch(e, selectedEl.id, "x", selW / 2 + pad)
+                  }
+                />
+                <rect
+                  x={-sidePillShort / 2}
+                  y={-sidePillLong / 2}
+                  width={sidePillShort}
+                  height={sidePillLong}
+                  rx={sidePillShort / 2}
+                  fill="#ffffff"
+                  stroke={ACCENT_COLOR}
+                  strokeWidth={strokeWidth * 1.1}
+                  style={{ cursor: "ew-resize", pointerEvents: "none" }}
+                />
+              </g>
+
+              {/* Top / North Handle (Vertical Stretch) */}
+              <g transform={`translate(0, ${-selH / 2 - pad})`}>
+                <rect
+                  x={-sidePillLong}
+                  y={-sidePillShort * 1.5}
+                  width={sidePillLong * 2}
+                  height={sidePillShort * 3}
+                  fill="transparent"
+                  style={{ cursor: "ns-resize" }}
+                  onPointerDown={(e) =>
+                    onPointerDownSideStretch(e, selectedEl.id, "y", selH / 2 + pad)
+                  }
+                />
+                <rect
+                  x={-sidePillLong / 2}
+                  y={-sidePillShort / 2}
+                  width={sidePillLong}
+                  height={sidePillShort}
+                  rx={sidePillShort / 2}
+                  fill="#ffffff"
+                  stroke={ACCENT_COLOR}
+                  strokeWidth={strokeWidth * 1.1}
+                  style={{ cursor: "ns-resize", pointerEvents: "none" }}
+                />
+              </g>
+
+              {/* Bottom / South Handle (Vertical Stretch) */}
+              <g transform={`translate(0, ${selH / 2 + pad})`}>
+                <rect
+                  x={-sidePillLong}
+                  y={-sidePillShort * 1.5}
+                  width={sidePillLong * 2}
+                  height={sidePillShort * 3}
+                  fill="transparent"
+                  style={{ cursor: "ns-resize" }}
+                  onPointerDown={(e) =>
+                    onPointerDownSideStretch(e, selectedEl.id, "y", selH / 2 + pad)
+                  }
+                />
+                <rect
+                  x={-sidePillLong / 2}
+                  y={-sidePillShort / 2}
+                  width={sidePillLong}
+                  height={sidePillShort}
+                  rx={sidePillShort / 2}
+                  fill="#ffffff"
+                  stroke={ACCENT_COLOR}
+                  strokeWidth={strokeWidth * 1.1}
+                  style={{ cursor: "ns-resize", pointerEvents: "none" }}
+                />
+              </g>
 
               {/* Stem line to Rotation Button */}
               <line

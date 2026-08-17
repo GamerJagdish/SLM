@@ -52,8 +52,8 @@ export function useHistory<T>(initial: T | (() => T)) {
 
   const undo = useCallback(() => {
     setHistory((prevHistory) => {
-      if (prevHistory.past.length === 0) return prevHistory;
       const previous = prevHistory.past[prevHistory.past.length - 1];
+      if (previous === undefined) return prevHistory;
       const newPast = prevHistory.past.slice(0, -1);
       last.current = { label: "", at: 0 };
       return {
@@ -66,8 +66,8 @@ export function useHistory<T>(initial: T | (() => T)) {
 
   const redo = useCallback(() => {
     setHistory((prevHistory) => {
-      if (prevHistory.future.length === 0) return prevHistory;
       const next = prevHistory.future[0];
+      if (next === undefined) return prevHistory;
       const newFuture = prevHistory.future.slice(1);
       last.current = { label: "", at: 0 };
       return {

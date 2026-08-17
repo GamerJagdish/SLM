@@ -79,6 +79,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Make a clean text logo with gradients and any Google Font. Export SVG or PNG.",
       },
       { name: "author", content: "SLM" },
+      { name: "theme-color", content: "#1a1a1f" },
+      { property: "og:site_name", content: "SLM" },
       { property: "og:type", content: "website" },
       { property: "og:title", content: "SLM - Simple Logo Maker" },
       {

@@ -11,7 +11,7 @@ export type Fill = {
 
 export type TextElement = {
   id: string;
-  type?: "text";
+  type?: "text" | undefined;
   text: string;
   family: string;
   weight: number;
@@ -22,6 +22,9 @@ export type TextElement = {
   rotation: number;
   opacity: number;
   fill: Fill;
+  scaleX?: number | undefined;
+  scaleY?: number | undefined;
+  fontWidth?: number | undefined;
 };
 
 export type ImageElement = {
@@ -36,7 +39,7 @@ export type ImageElement = {
   rotation: number;
   opacity: number;
   aspectRatio: number;
-  borderRadius?: number;
+  borderRadius?: number | undefined;
 };
 
 export type CanvasElement = TextElement | ImageElement;
@@ -145,6 +148,9 @@ export function newTextElement(doc: LogoDoc, text = "Your Brand"): TextElement {
     y: Math.round(doc.height / 2),
     rotation: 0,
     opacity: 1,
+    scaleX: 1,
+    scaleY: 1,
+    fontWidth: 100,
     fill: defaultFill(),
   };
 }
