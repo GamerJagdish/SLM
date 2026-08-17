@@ -158,15 +158,8 @@ export function newImageElement(
 ): ImageElement {
   const maxInitialSize = Math.round(Math.min(doc.width, doc.height) * 0.45);
   const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1;
-  let w = maxInitialSize;
-  let h = maxInitialSize;
-  if (aspect >= 1) {
-    w = maxInitialSize;
-    h = Math.max(20, Math.round(maxInitialSize / aspect));
-  } else {
-    h = maxInitialSize;
-    w = Math.max(20, Math.round(maxInitialSize * aspect));
-  }
+  const w = aspect >= 1 ? maxInitialSize : Math.max(20, Math.round(maxInitialSize * aspect));
+  const h = aspect >= 1 ? Math.max(20, Math.round(maxInitialSize / aspect)) : maxInitialSize;
   return {
     id: uid(),
     type: "image",

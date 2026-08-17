@@ -124,6 +124,17 @@ const initialDoc = (): LogoDoc => {
   return doc;
 };
 
+const getInitialDoc = (): LogoDoc => {
+  if (typeof window !== "undefined") {
+    const code = new URLSearchParams(window.location.search).get("d");
+    const shared = code ? decodeDoc(code) : null;
+    if (shared) return shared;
+    const local = loadLocal();
+    if (local) return local;
+  }
+  return initialDoc();
+};
+
 function Studio() {
   const fetchFonts = useServerFn(getGoogleFonts);
   const { data: fonts = [] } = useQuery<GoogleFont[]>({
@@ -135,14 +146,13 @@ function Studio() {
   const {
     state: doc,
     set: setDoc,
-    reset: resetDoc,
     undo,
     redo,
     canUndo,
     canRedo,
-  } = useHistory<LogoDoc>(initialDoc);
+  } = useHistory<LogoDoc>(getInitialDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [exportWidth, setExportWidth] = useState(800);
+  const [exportWidth, setExportWidth] = useState(() => doc.width || 800);
   const [busy, setBusy] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [snap, setSnap] = useState(true);
@@ -151,31 +161,18 @@ function Studio() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Restore from a share link (?d=...) or the last local autosave.
+  // Notify on shared design load
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get("d");
-    const shared = code ? decodeDoc(code) : null;
-    if (shared) {
-      resetDoc(shared);
-      setExportWidth(shared.width);
+    if (code && decodeDoc(code)) {
       toast.success("Loaded shared design");
-      return;
     }
-    const local = loadLocal();
-    if (local) {
-      resetDoc(local);
-      setExportWidth(local.width);
-    }
-  }, [resetDoc]);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => saveLocal(doc), 400);
     return () => clearTimeout(t);
   }, [doc]);
-
-  useEffect(() => {
-    if (!selectedId && doc.elements[0]) setSelectedId(doc.elements[0].id);
-  }, [doc.elements, selectedId]);
 
   useEffect(() => {
     doc.elements.filter(isTextElement).forEach((el) => loadGoogleFont(el.family, el.weight));
@@ -194,7 +191,11 @@ function Studio() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  const selected = doc.elements.find((e) => e.id === selectedId) ?? null;
+  const activeSelectedId =
+    selectedId && doc.elements.some((e) => e.id === selectedId)
+      ? selectedId
+      : (doc.elements[0]?.id ?? null);
+  const selected = doc.elements.find((e) => e.id === activeSelectedId) ?? null;
   const ratio = doc.height / doc.width;
   const exportHeight = Math.round(exportWidth * ratio);
 
@@ -490,9 +491,11 @@ function Studio() {
         <section className="space-y-3">
           <LogoCanvas
             doc={doc}
-            selectedId={selectedId}
+            selectedId={activeSelectedId}
             onSelect={setSelectedId}
             onMove={(id, x, y) => patchEl(id, { x, y }, "move")}
+            onRotate={(id, rotation) => patchEl(id, { rotation }, "rotate")}
+            onResize={(id, patch) => patchEl(id, patch, "resize")}
             svgRef={svgRef}
             showGrid={showGrid}
             snap={snap}
@@ -546,7 +549,7 @@ function Studio() {
                   onClick={() => setSelectedId(el.id)}
                   className={cn(
                     "flex max-w-44 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
-                    el.id === selectedId
+                    el.id === activeSelectedId
                       ? "border-primary bg-primary/15 text-foreground"
                       : "border-border bg-surface text-muted-foreground hover:text-foreground",
                   )}
@@ -954,7 +957,7 @@ function Studio() {
                 <div className="space-y-1.5">
                   {[...doc.elements].reverse().map((el, revIdx) => {
                     const isTxt = isTextElement(el);
-                    const isSel = el.id === selectedId;
+                    const isSel = el.id === activeSelectedId;
                     const label = isTxt ? el.text || "Empty text" : el.name || "Image";
 
                     return (

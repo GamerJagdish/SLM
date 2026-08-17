@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { angleToCoords, isImageElement, isTextElement, type LogoDoc } from "@/lib/logo";
+import {
+  angleToCoords,
+  isImageElement,
+  isTextElement,
+  type CanvasElement,
+  type LogoDoc,
+} from "@/lib/logo";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -7,17 +13,51 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onMove: (id: string, x: number, y: number) => void;
+  onRotate?: (id: string, rotation: number) => void;
+  onResize?: (id: string, patch: Partial<CanvasElement>) => void;
   svgRef: React.RefObject<SVGSVGElement | null>;
   showGrid?: boolean;
   snap?: boolean;
   onDropImage?: (file: File) => void;
 };
 
+type DragAction =
+  | {
+      type: "move";
+      id: string;
+      startX: number;
+      startY: number;
+      originX: number;
+      originY: number;
+    }
+  | {
+      type: "rotate";
+      id: string;
+      centerX: number;
+      centerY: number;
+      startAngle: number;
+      originRotation: number;
+    }
+  | {
+      type: "resize";
+      id: string;
+      handle: "nw" | "ne" | "se" | "sw";
+      centerX: number;
+      centerY: number;
+      startDist: number;
+      startWidth: number;
+      startHeight: number;
+      startSize?: number;
+      isText: boolean;
+    };
+
 export function LogoCanvas({
   doc,
   selectedId,
   onSelect,
   onMove,
+  onRotate,
+  onResize,
   svgRef,
   showGrid = false,
   snap = true,
@@ -25,27 +65,35 @@ export function LogoCanvas({
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [measuredText, setMeasuredText] = useState<Record<string, { w: number; h: number }>>({});
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
-  const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const dragAction = useRef<DragAction | null>(null);
 
   const measure = useCallback(() => {
     const svg = svgRef.current;
-    if (!svg || !selectedId) return setBox(null);
-    const node = svg.querySelector<SVGGraphicsElement>(`[data-el="${selectedId}"]`);
-    if (!node) return setBox(null);
-    try {
-      const b = node.getBBox();
-      setBox({ x: b.x, y: b.y, w: b.width, h: b.height });
-    } catch {
-      setBox(null);
-    }
-  }, [selectedId, svgRef]);
+    if (!svg) return;
+    const newMeasured: Record<string, { w: number; h: number }> = {};
+    doc.elements.filter(isTextElement).forEach((el) => {
+      const node = svg.querySelector<SVGTextElement>(`text[data-el="${el.id}"]`);
+      if (node) {
+        try {
+          const b = node.getBBox();
+          newMeasured[el.id] = { w: Math.max(20, b.width), h: Math.max(20, b.height) };
+        } catch {
+          newMeasured[el.id] = {
+            w: Math.max(20, el.size * (el.text?.length || 1) * 0.6),
+            h: Math.max(20, el.size),
+          };
+        }
+      }
+    });
+    setMeasuredText(newMeasured);
+  }, [doc.elements, svgRef]);
 
   useEffect(() => {
     measure();
-    const t = setTimeout(measure, 300);
-    const t2 = setTimeout(measure, 1200);
+    const t = setTimeout(measure, 150);
+    const t2 = setTimeout(measure, 600);
     return () => {
       clearTimeout(t);
       clearTimeout(t2);
@@ -57,18 +105,77 @@ export function LogoCanvas({
     (document as Document).fonts.ready.then(measure).catch(() => {});
   }, [measure, doc]);
 
-  const scale = () => {
+  const getCanvasPoint = (e: { clientX: number; clientY: number }) => {
     const svg = svgRef.current;
-    if (!svg) return 1;
-    return svg.getBoundingClientRect().width / doc.width || 1;
+    if (!svg) return { x: 0, y: 0 };
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0, y: 0 };
+    return {
+      x: ((e.clientX - r.left) / r.width) * doc.width,
+      y: ((e.clientY - r.top) / r.height) * doc.height,
+    };
   };
 
-  const onPointerDown = (e: React.PointerEvent, id: string) => {
+  const onPointerDownMove = (e: React.PointerEvent, id: string) => {
     e.preventDefault();
     onSelect(id);
     const el = doc.elements.find((n) => n.id === id);
     if (!el) return;
-    drag.current = { id, sx: e.clientX, sy: e.clientY, ox: el.x, oy: el.y };
+    const pt = getCanvasPoint(e);
+    dragAction.current = {
+      type: "move",
+      id,
+      startX: pt.x,
+      startY: pt.y,
+      originX: el.x,
+      originY: el.y,
+    };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerDownRotate = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = doc.elements.find((n) => n.id === id);
+    if (!el) return;
+    const pt = getCanvasPoint(e);
+    const startAngle = (Math.atan2(pt.y - el.y, pt.x - el.x) * 180) / Math.PI;
+    dragAction.current = {
+      type: "rotate",
+      id,
+      centerX: el.x,
+      centerY: el.y,
+      startAngle,
+      originRotation: el.rotation,
+    };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerDownResize = (
+    e: React.PointerEvent,
+    id: string,
+    handle: "nw" | "ne" | "se" | "sw",
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = doc.elements.find((n) => n.id === id);
+    if (!el) return;
+    const pt = getCanvasPoint(e);
+    const startDist = Math.hypot(pt.x - el.x, pt.y - el.y);
+    const isText = isTextElement(el);
+
+    dragAction.current = {
+      type: "resize",
+      id,
+      handle,
+      centerX: el.x,
+      centerY: el.y,
+      startDist: Math.max(startDist, 10),
+      startWidth: isText ? el.size : el.width,
+      startHeight: isText ? el.size : el.height,
+      startSize: isText ? el.size : undefined,
+      isText,
+    };
     (e.target as Element).setPointerCapture?.(e.pointerId);
   };
 
@@ -86,35 +193,71 @@ export function LogoCanvas({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    const s = scale();
-    let x = Math.round(d.ox + (e.clientX - d.sx) / s);
-    let y = Math.round(d.oy + (e.clientY - d.sy) / s);
+    const act = dragAction.current;
+    if (!act) return;
+    const pt = getCanvasPoint(e);
 
-    const hits: { v: number[]; h: number[] } = { v: [], h: [] };
-    if (snap) {
-      const tol = 8 / s;
-      const others = doc.elements.filter((el) => el.id !== d.id);
-      const vt = [doc.width / 2, ...others.map((o) => o.x)];
-      const ht = [doc.height / 2, ...others.map((o) => o.y)];
-      const sx = snapAxis(x, vt, tol);
-      const sy = snapAxis(y, ht, tol);
-      if (sx !== null) {
-        x = Math.round(sx);
-        hits.v.push(x);
+    if (act.type === "move") {
+      let x = Math.round(act.originX + (pt.x - act.startX));
+      let y = Math.round(act.originY + (pt.y - act.startY));
+
+      const hits: { v: number[]; h: number[] } = { v: [], h: [] };
+      if (snap) {
+        const tol = 8;
+        const others = doc.elements.filter((el) => el.id !== act.id);
+        const vt = [doc.width / 2, ...others.map((o) => o.x)];
+        const ht = [doc.height / 2, ...others.map((o) => o.y)];
+        const sx = snapAxis(x, vt, tol);
+        const sy = snapAxis(y, ht, tol);
+        if (sx !== null) {
+          x = Math.round(sx);
+          hits.v.push(x);
+        }
+        if (sy !== null) {
+          y = Math.round(sy);
+          hits.h.push(y);
+        }
       }
-      if (sy !== null) {
-        y = Math.round(sy);
-        hits.h.push(y);
+      setGuides(hits);
+      onMove(act.id, x, y);
+    } else if (act.type === "rotate") {
+      const curAngle = (Math.atan2(pt.y - act.centerY, pt.x - act.centerX) * 180) / Math.PI;
+      const delta = curAngle - act.startAngle;
+      let rot = Math.round(act.originRotation + delta);
+
+      while (rot > 180) rot -= 360;
+      while (rot < -180) rot += 360;
+
+      // Snap to cardinal angles (0, 45, 90, 135, 180, -45, -90, -135) within 3.5 degrees
+      const snapAngles = [-180, -135, -90, -45, 0, 45, 90, 135, 180];
+      for (const sa of snapAngles) {
+        if (Math.abs(rot - sa) <= 3.5) {
+          rot = sa === -180 ? 180 : sa;
+          break;
+        }
+      }
+
+      onRotate?.(act.id, rot);
+    } else if (act.type === "resize") {
+      const curDist = Math.hypot(pt.x - act.centerX, pt.y - act.centerY);
+      const scale = Math.max(0.08, curDist / act.startDist);
+
+      if (act.isText) {
+        const newSize = Math.max(
+          8,
+          Math.min(Math.round((act.startSize || 32) * scale), Math.max(doc.width, doc.height) * 2),
+        );
+        onResize?.(act.id, { size: newSize });
+      } else {
+        const newWidth = Math.max(16, Math.round(act.startWidth * scale));
+        const newHeight = Math.max(16, Math.round(act.startHeight * scale));
+        onResize?.(act.id, { width: newWidth, height: newHeight });
       }
     }
-    setGuides(hits);
-    onMove(d.id, x, y);
   };
 
   const endDrag = () => {
-    drag.current = null;
+    dragAction.current = null;
     setGuides({ v: [], h: [] });
     measure();
   };
@@ -142,6 +285,29 @@ export function LogoCanvas({
       onDropImage(file);
     }
   };
+
+  const selectedEl = doc.elements.find((e) => e.id === selectedId) ?? null;
+
+  // Compute bounding box dimensions for selected element
+  let selW = 0;
+  let selH = 0;
+  if (selectedEl) {
+    if (isImageElement(selectedEl)) {
+      selW = selectedEl.width;
+      selH = selectedEl.height;
+    } else if (isTextElement(selectedEl)) {
+      const m = measuredText[selectedEl.id];
+      selW = m?.w || Math.max(20, selectedEl.size * (selectedEl.text?.length || 1) * 0.6);
+      selH = m?.h || Math.max(20, selectedEl.size);
+    }
+  }
+
+  const ACCENT_COLOR = "oklch(0.88 0.21 125)";
+  const pad = Math.max(6, doc.width / 150);
+  const strokeWidth = Math.max(1.5, doc.width / 500);
+  const cornerR = Math.max(5, doc.width / 130);
+  const rotateR = Math.max(11, doc.width / 65);
+  const rotateOffset = Math.max(28, doc.width / 24);
 
   return (
     <div
@@ -275,7 +441,7 @@ export function LogoCanvas({
                   fill={el.fill.type === "solid" ? el.fill.color : `url(#slm-fill-${el.id})`}
                   transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
                   style={{ cursor: "move" }}
-                  onPointerDown={(e) => onPointerDown(e, el.id)}
+                  onPointerDown={(e) => onPointerDownMove(e, el.id)}
                 >
                   {el.text}
                 </text>
@@ -292,7 +458,7 @@ export function LogoCanvas({
                   transform={`translate(${el.x}, ${el.y}) rotate(${el.rotation})`}
                   opacity={el.opacity}
                   style={{ cursor: "move" }}
-                  onPointerDown={(e) => onPointerDown(e, el.id)}
+                  onPointerDown={(e) => onPointerDownMove(e, el.id)}
                 >
                   {clipId && (
                     <defs>
@@ -325,21 +491,104 @@ export function LogoCanvas({
             return null;
           })}
 
-          {box && selectedId && (
-            <g data-editor-only="true" pointerEvents="none">
+          {/* Canva-style Selection Box, Corner Scaling Handles & Rotation Handle */}
+          {selectedEl && selW > 0 && selH > 0 && (
+            <g
+              data-editor-only="true"
+              transform={`translate(${selectedEl.x}, ${selectedEl.y}) rotate(${selectedEl.rotation})`}
+            >
+              {/* Dotted border around element */}
               <rect
-                x={box.x - 8}
-                y={box.y - 8}
-                width={box.w + 16}
-                height={box.h + 16}
+                x={-selW / 2 - pad}
+                y={-selH / 2 - pad}
+                width={selW + pad * 2}
+                height={selH + pad * 2}
                 fill="none"
-                stroke="oklch(0.88 0.21 125)"
-                strokeWidth={Math.max(1.5, doc.width / 500)}
-                strokeDasharray={`${doc.width / 90} ${doc.width / 90}`}
+                stroke={ACCENT_COLOR}
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${doc.width / 100} ${doc.width / 100}`}
+                rx={3}
+                pointerEvents="none"
               />
+
+              {/* 4 Corner Scaling Handles */}
+              {(
+                [
+                  { handle: "nw", cx: -selW / 2 - pad, cy: -selH / 2 - pad, cursor: "nwse-resize" },
+                  { handle: "ne", cx: selW / 2 + pad, cy: -selH / 2 - pad, cursor: "nesw-resize" },
+                  { handle: "se", cx: selW / 2 + pad, cy: selH / 2 + pad, cursor: "nwse-resize" },
+                  { handle: "sw", cx: -selW / 2 - pad, cy: selH / 2 + pad, cursor: "nesw-resize" },
+                ] as const
+              ).map(({ handle, cx, cy, cursor }) => (
+                <g key={handle} transform={`translate(${cx}, ${cy})`}>
+                  {/* Invisible larger hit target for easy touch / clicking */}
+                  <circle
+                    r={cornerR * 2.2}
+                    fill="transparent"
+                    style={{ cursor }}
+                    onPointerDown={(e) => onPointerDownResize(e, selectedEl.id, handle)}
+                  />
+                  {/* Visible white handle knob */}
+                  <circle
+                    r={cornerR}
+                    fill="#ffffff"
+                    stroke={ACCENT_COLOR}
+                    strokeWidth={strokeWidth * 1.2}
+                    style={{ cursor, pointerEvents: "none" }}
+                  />
+                </g>
+              ))}
+
+              {/* Stem line to Rotation Button */}
+              <line
+                x1={0}
+                y1={selH / 2 + pad}
+                x2={0}
+                y2={selH / 2 + pad + rotateOffset}
+                stroke={ACCENT_COLOR}
+                strokeWidth={strokeWidth}
+                strokeDasharray="3 3"
+                pointerEvents="none"
+              />
+
+              {/* Rotation Handle Button (Canva UI Style) */}
+              <g
+                transform={`translate(0, ${selH / 2 + pad + rotateOffset})`}
+                onPointerDown={(e) => onPointerDownRotate(e, selectedEl.id)}
+                style={{ cursor: "grab" }}
+              >
+                {/* Large invisible hit area */}
+                <circle r={rotateR * 1.8} fill="transparent" />
+                {/* Button background circle */}
+                <circle
+                  r={rotateR}
+                  fill="#ffffff"
+                  stroke={ACCENT_COLOR}
+                  strokeWidth={strokeWidth * 1.2}
+                />
+                {/* Rotate icon (circular arrows) */}
+                <g transform="scale(0.85)">
+                  <path
+                    d="M-5 -2 A 6 6 0 1 1 -2 5.5"
+                    fill="none"
+                    stroke="#111827"
+                    strokeWidth={Math.max(1.4, doc.width / 500)}
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M-6.5 -4.5 L -5 -2 L -2.5 -4"
+                    fill="none"
+                    stroke="#111827"
+                    strokeWidth={Math.max(1.4, doc.width / 500)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </g>
+              </g>
             </g>
           )}
 
+          {/* Alignment Snapping Guide Lines */}
           {(guides.v.length > 0 || guides.h.length > 0) && (
             <g data-editor-only="true" pointerEvents="none">
               {guides.v.map((x) => (
@@ -349,7 +598,7 @@ export function LogoCanvas({
                   y1={0}
                   x2={x}
                   y2={doc.height}
-                  stroke="oklch(0.88 0.21 125)"
+                  stroke={ACCENT_COLOR}
                   strokeWidth={Math.max(1.5, doc.width / 600)}
                 />
               ))}
@@ -360,7 +609,7 @@ export function LogoCanvas({
                   y1={y}
                   x2={doc.width}
                   y2={y}
-                  stroke="oklch(0.88 0.21 125)"
+                  stroke={ACCENT_COLOR}
                   strokeWidth={Math.max(1.5, doc.width / 600)}
                 />
               ))}

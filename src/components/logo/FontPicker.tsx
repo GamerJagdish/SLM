@@ -25,10 +25,19 @@ export function FontPicker({ fonts, value, onChange }: Props) {
 
   const results = useMemo(() => matches.slice(0, limit), [matches, limit]);
 
-  useEffect(() => {
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setQ("");
+      setLimit(40);
+    }
+  };
+
+  const handleSearchChange = (val: string) => {
+    setQ(val);
     setLimit(40);
     listRef.current?.scrollTo({ top: 0 });
-  }, [q, open]);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -44,7 +53,7 @@ export function FontPicker({ fonts, value, onChange }: Props) {
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -61,7 +70,7 @@ export function FontPicker({ fonts, value, onChange }: Props) {
           <Input
             autoFocus
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder={`Search ${fonts.length} Google Fonts`}
             className="h-10 border-0 bg-transparent px-0 focus-visible:ring-0"
           />
