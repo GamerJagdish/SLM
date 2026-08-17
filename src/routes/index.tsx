@@ -453,7 +453,7 @@ function Studio() {
       />
 
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto grid max-w-[1500px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
+        <div className="mx-auto grid max-w-375 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary font-display text-sm font-bold text-primary-foreground">
               SLM
@@ -486,7 +486,7 @@ function Studio() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1500px] gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_390px]">
+      <main className="mx-auto grid max-w-375 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_390px]">
         <section className="space-y-3">
           <LogoCanvas
             doc={doc}
@@ -1023,7 +1023,7 @@ function Studio() {
       </main>
 
       <footer className="mt-8 border-t border-border/40 py-4 text-xs text-muted-foreground">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4">
+        <div className="mx-auto flex max-w-375 flex-wrap items-center justify-between gap-3 px-4">
           <p className="font-display font-medium text-foreground/80">SLM - Simple Logo Maker</p>
           <a
             href="https://github.com/GamerJagdish/slm"
