@@ -36,16 +36,7 @@ export default tseslint.config(
         "warn",
         {
           allowConstantExport: true,
-          allowExportNames: [
-            "Route",
-            "buttonVariants",
-            "badgeVariants",
-            "toggleVariants",
-            "navigationMenuTriggerStyle",
-            "sidebarMenuButtonVariants",
-            "useFormField",
-            "useSidebar",
-          ],
+          allowExportNames: ["Route", "buttonVariants"],
         },
       ],
       "@typescript-eslint/no-unused-vars": "off",
