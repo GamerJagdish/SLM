@@ -1,3 +1,4 @@
 [install]
 saveTextLockfile = true
-
+linker = "isolated"
+globalStore = true
