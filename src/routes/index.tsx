@@ -503,7 +503,7 @@ function Studio() {
       </header>
 
       <main className="mx-auto grid max-w-375 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <section className="space-y-3">
+        <section className="space-y-3 lg:sticky lg:top-20 lg:self-start">
           <LogoCanvas
             doc={doc}
             selectedId={activeSelectedId}
